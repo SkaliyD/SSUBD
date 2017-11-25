@@ -6,7 +6,6 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
-import javafx.scene.control.cell.ComboBoxTableCell;
 import javafx.scene.control.cell.TextFieldTableCell;
 import org.intellij.lang.annotations.Language;
 
@@ -16,13 +15,7 @@ import java.sql.SQLException;
 public class Controller {
 
     @FXML
-    private TextField textSearch;
-
-    @FXML
-    private ComboBox<String> comboTable;
-
-    @FXML
-    private Button buttonAdd, buttonDelete;
+    private ComboBox<String> comboQuery, comboParameter;
 
     @FXML
     private TableView<String[]> table;
@@ -37,14 +30,22 @@ public class Controller {
             JOptionPane.showMessageDialog(JOptionPane.getRootFrame(), "Ошибка подключения");
         }
 
-        comboTable.setItems(FXCollections.observableArrayList(
-                "- выбор -", "Сотрудники", "Должности", "Компоненты", "Производители", "Услуги", "Ремонты"));
+        comboQuery.setItems(FXCollections.observableArrayList("- выбор -",
+                "Кол-во выполненных заказов сотрудников начиная с max",
+                "Детали работ по указанному номеру заказа",
+                "Среднее кол-во заказов за неделю",
+                "Сотрудник, совершивший работы по наиболее дорогому заказу",
+                "Компоненты, кол-во которых менее 5"));
+        comboParameter.getItems().add("- выбор -");
+        comboParameter.getItems().addAll(setItemsCombo("SELECT id_repair FROM repairs ORDER BY id_repair"));
 
-        comboTable.setOnAction(event -> {
+        comboQuery.setOnAction(event1 -> {
 
             table.setDisable(false);
+            comboParameter.getSelectionModel().select(0);
+            comboParameter.setDisable(true);
 
-            switch (comboTable.getSelectionModel().getSelectedIndex()) {
+            switch (comboQuery.getSelectionModel().getSelectedIndex()) {
 
                 case 0:
                     table.getColumns().clear();
@@ -53,97 +54,105 @@ public class Controller {
                     break;
 
                 case 1:
-
-                    setTable("SELECT e.id_employee, e.key_employee, p.title, " +
-                                    "e.last_name, e.first_name, e.patr_name, e.phone_number, e.address, e.email " +
-                                    "FROM employees e, positions p " +
-                                    "WHERE e.id_position = p.id_position " +
-                                    "ORDER BY e.id_employee",
-                            new String[]{"", "", "Должность", "Фамилия", "Имя", "Отчевство",
-                                    "Номер телефона", "Адрес", "Email"},
-                            new ObservableList[]{setItemsCombo("SELECT title FROM positions ORDER BY title")},
-                            new int[]{2});
-                    table.getColumns().get(1).setVisible(false);
-
+                    try {
+                        setTable(
+                                "SELECT concat(e.last_name, ' ', e.first_name, ' ', e.patr_name) AS employees, " +
+                                        "count(r.*) AS count " +
+                                        "FROM employees e, repairs r " +
+                                        "WHERE e.id_employee = r.id_employee " +
+                                        "GROUP BY employees " +
+                                        "ORDER BY count(r.id_repair) DESC",
+                                new String[]{"Сотрудник", "Кол-во заказов"});
+                    } catch (SQLException e) {
+                        table.getColumns().add(new TableColumn<String[], String>("Ошибка"));
+                    }
                     break;
 
                 case 2:
+                    table.getColumns().clear();
+                    table.getItems().clear();
 
-                    setTable("SELECT * FROM positions ORDER BY id_position",
-                            new String[]{"", "Название", "Зарплата"},
-                            null, null);
+                    comboParameter.setDisable(false);
+                    comboParameter.setOnAction(event2 -> {
+                        if (!comboParameter.getSelectionModel().isSelected(0)) {
+                            try {
+                                setTable("SELECT DISTINCT array(" +
+                                                "   SELECT s.title " +
+                                                "   FROM services s " +
+                                                "   WHERE s.id_service = ANY (rd.ids_service) " +
+                                                "   AND rd.id_repair = r.id_repair " +
+                                                "   AND r.id_repair = "
+                                                + comboParameter.getSelectionModel().getSelectedItem() + ") :: TEXT, " +
+                                                "array(" +
+                                                "   SELECT concat(m.name, ' ', c.name) " +
+                                                "   FROM components c, manufacturers m " +
+                                                "   WHERE c.id_manufacturer = m.id_manufacturer " +
+                                                "   AND c.id_component = ANY (rd.ids_component) " +
+                                                "   AND rd.id_repair = r.id_repair " +
+                                                "   AND r.id_repair = "
+                                                + comboParameter.getSelectionModel().getSelectedItem() + ") :: TEXT " +
+                                                "FROM repairs r, repair_details rd " +
+                                                "WHERE r.id_repair = rd.id_repair " +
+                                                "AND r.id_repair = " + comboParameter.getSelectionModel().getSelectedItem(),
+                                        new String[]{"Услуги", "Компоненты"});
 
+                                for (int i = 0; i < table.getItems().size(); i++) {
+                                    table.getItems().get(i)[0] = table.getItems().get(i)[0]
+                                            .replace("{", "- ")
+                                            .replace("}", "")
+                                            .replaceAll(",", "\n- ")
+                                            .replaceAll("\"", "");
+                                    table.getItems().get(i)[1] = table.getItems().get(i)[1]
+                                            .replace("{", "- ")
+                                            .replace("}", "")
+                                            .replaceAll(",", "\n- ")
+                                            .replaceAll("\"", "");
+                                }
+                            } catch (SQLException e) {
+                                table.getColumns().add(new TableColumn<String[], String>("Ошибка"));
+                            }
+                        }
+                    });
                     break;
 
                 case 3:
-
-                    setTable("SELECT c.id_component, m.name, c.type, c.name, c.price, " +
-                                    "c.quantity, c.state, c.detail " +
-                                    "FROM components c, manufacturers m " +
-                                    "WHERE c.id_manufacturer = m.id_manufacturer " +
-                                    "ORDER BY c.id_component",
-                            new String[]{"", "Производитель", "Тип", "Название", "Цена",
-                                    "Кол-во", "Состояние", "Подробно"},
-                            new ObservableList[]{setItemsCombo("SELECT name FROM manufacturers ORDER BY name")},
-                            new int[]{1});
-
+                    try {
+                        setTable("SELECT avg(" +
+                                        "(SELECT count(r2.id_repair) " +
+                                        " FROM repairs r2 " +
+                                        " WHERE date_part('weeks', r2.date_repair) = date_part('weeks', r1.date_repair))" +
+                                        ") FROM repairs r1",
+                                new String[]{"Кол-во"});
+                    } catch (SQLException e) {
+                        table.getColumns().add(new TableColumn<String[], String>("Ошибка"));
+                    }
                     break;
 
                 case 4:
-
-                    setTable("SELECT * FROM manufacturers ORDER BY name",
-                            new String[]{"", "Название", "Страна"},
-                            null, null);
-
+                    try {
+                        setTable(
+                                "SELECT concat(e.last_name, ' ', e.first_name, ' ', e.patr_name) " +
+                                        "FROM employees e, repairs r1 " +
+                                        "WHERE e.id_employee = r1.id_employee " +
+                                        "AND r1.amount = (SELECT max(r2.amount) " +
+                                        "                 FROM repairs r2)",
+                                new String[]{"Сотрудник"});
+                    } catch (SQLException e) {
+                        table.getColumns().add(new TableColumn<String[], String>("Ошибка"));
+                    }
                     break;
 
                 case 5:
-
-                    setTable("SELECT * FROM services ORDER BY id_service",
-                            new String[]{"", "Название", "Цена", "Описание"},
-                            null, null);
-
-                    break;
-
-                case 6:
-
-                    setTable("SELECT DISTINCT r.id_repair, r.date_repair, r.amount, " +
-                                    "concat(e.last_name, ' ', e.first_name, ' ', e.patr_name), " +
-                                    "array(" +
-                                    "   SELECT s.title " +
-                                    "   FROM services s, repair_details rd " +
-                                    "   WHERE s.id_service = ANY (rd.ids_service) " +
-                                    "   AND rd.id_repair = r.id_repair) :: TEXT,  " +
-                                    "array(" +
-                                    "   SELECT concat(m.name, ' ', c.name) " +
-                                    "   FROM components c, manufacturers m, repair_details rd " +
-                                    "   WHERE c.id_manufacturer = m.id_manufacturer " +
-                                    "   AND c.id_component = ANY (rd.ids_component)" +
-                                    "   AND rd.id_repair = r.id_repair) :: TEXT " +
-                                    "FROM repairs r, employees e, repair_details rd " +
-                                    "WHERE r.id_employee = e.id_employee " +
-                                    "ORDER BY r.id_repair",
-                            new String[]{"", "Дата ремонта", "Сумма", "Работник", "Услуги", "Компоненты"},
-                            new ObservableList[]{
-                                    setItemsCombo("SELECT concat(last_name, ' ', first_name, ' ', patr_name) " +
-                                            "FROM employees ORDER BY id_employee")},
-                            new int[]{3});
-
-                    table.getColumns().get(4).setEditable(false);
-                    table.getColumns().get(5).setEditable(false);
-
-                    for (int i = 0; i < table.getItems().size(); i++) {
-                        table.getItems().get(i)[4] = table.getItems().get(i)[4]
-                                .replace("{", "- ")
-                                .replace("}", "")
-                                .replaceAll(",", "\n- ");
-                        table.getItems().get(i)[5] = table.getItems().get(i)[5]
-                                .replace("{", "- ")
-                                .replace("}", "")
-                                .replaceAll(",", "\n- ")
-                                .replaceAll("\"", "");
+                    try {
+                        setTable(
+                                "SELECT concat(c.type, ' ', m.name, ' ', c.name) " +
+                                        "FROM components c, manufacturers m " +
+                                        "WHERE c.id_manufacturer = m.id_manufacturer " +
+                                        "      AND c.quantity <= 5",
+                                new String[]{"Компоненты"});
+                    } catch (SQLException e) {
+                        table.getColumns().add(new TableColumn<String[], String>("Ошибка"));
                     }
-
                     break;
 
             }
@@ -151,51 +160,23 @@ public class Controller {
 
     }
 
-    private void setTable(@Language("SQL") String sql, String[] colName,
-                          ObservableList<String>[] comboItems, int[] indexColumnCombo) {
-
+    private void setTable(@Language("SQL") String sql, String[] colName) throws SQLException {
         table.getColumns().clear();
         table.getItems().clear();
-
-        String[][] records = null;
-        try {
-            records = db.query(true, sql);
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
-
-        for (int i = 0, j = 0; i < records[0].length; i++) {
+        String[][] records = db.query(true, sql);
+        for (int i = 0; i < records[0].length; i++) {
             TableColumn<String[], String> tableColumn = new TableColumn<>(colName[i]);
             final int col = i;
             tableColumn.setCellValueFactory(
                     (TableColumn.CellDataFeatures<String[], String> param) -> new SimpleStringProperty(param.getValue()[col]));
-
-            boolean combo = false;
-
-            if (comboItems == null && indexColumnCombo == null) {
-                tableColumn.setCellFactory(TextFieldTableCell.forTableColumn());
-                tableColumn.setEditable(true);
-            } else {
-                for (int indexColumn : indexColumnCombo)
-                    if (i == indexColumn) {
-                        combo = true;
-                        break;
-                    }
-            }
-            if (combo) {
-                tableColumn.setCellFactory(ComboBoxTableCell.forTableColumn(comboItems[j++]));
-            } else {
-                tableColumn.setCellFactory(TextFieldTableCell.forTableColumn());
-            }
+            tableColumn.setCellFactory(TextFieldTableCell.forTableColumn());
+            tableColumn.setEditable(true);
+            tableColumn.setCellFactory(TextFieldTableCell.forTableColumn());
             table.getColumns().add(tableColumn);
         }
-
         ObservableList<String[]> items = FXCollections.observableArrayList(records);
-
         table.setItems(items);
-        table.getColumns().get(0).setVisible(false);
         table.setEditable(true);
-
     }
 
     private ObservableList<String> setItemsCombo(@Language("SQL") String sql) {
