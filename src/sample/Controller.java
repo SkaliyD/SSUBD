@@ -145,11 +145,11 @@ public class Controller {
                 case 5:
                     try {
                         setTable(
-                                "SELECT concat(c.type, ' ', m.name, ' ', c.name) " +
+                                "SELECT concat(c.type, ' ', m.name, ' ', c.name), c.quantity " +
                                         "FROM components c, manufacturers m " +
                                         "WHERE c.id_manufacturer = m.id_manufacturer " +
                                         "      AND c.quantity <= 5",
-                                new String[]{"Компоненты"});
+                                new String[]{"Компоненты", "Количество"});
                     } catch (SQLException e) {
                         table.getColumns().add(new TableColumn<String[], String>("Ошибка"));
                     }
